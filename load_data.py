@@ -4,6 +4,8 @@ from random import randint
 
 fake = Faker()
 
+db.create_all()
+
 # Verificar si ya existen registros en la base de datos
 if Donante.query.count() == 0:
     # Generar 5000 registros aleatorios

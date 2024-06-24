@@ -4,8 +4,11 @@ import pandas as pd
 from pandas import Timestamp
 from sklearn.linear_model import LinearRegression
 import numpy as np
+from statsmodels.tsa.arima.model import ARIMA
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:12345@localhost/donaciones'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.app_context().push()
@@ -159,6 +162,41 @@ def get_prediccion(year):
 
     return response, 200, {'Access-Control-Allow-Origin': '*'}
 
+@app.route('/api/prediccion-a/<int:year>', methods=['GET'])
+def get_prediccion_a(year):
+    # Consultar todas las donaciones y sus fechas para el año especificado
+    donaciones = db.session.query(Donacion, Fecha).join(Fecha, Donacion.fecha_id == Fecha.id).filter(Fecha.anio == year).all()
+    
+    # Crear una lista de diccionarios con los datos necesarios
+    datos = [{'fecha': f'{fecha.anio}-{fecha.mes:02d}-{fecha.dia:02d}', 'cant_articulo': donacion.cant_articulo} for donacion, fecha in donaciones]
+
+    # Convertir la lista de diccionarios a un DataFrame de pandas
+    df = pd.DataFrame(datos)
+ 
+    # Convertir la columna de fechas a un objeto datetime
+    df['fecha'] = pd.to_datetime(df['fecha'])
+
+    # Establecer la columna de fechas como el índice del DataFrame
+    df.set_index('fecha', inplace=True)
+    
+    # Agrupar por mes y sumar la cantidad de artículos donados
+    series_temporal = df.resample('M').sum()
+
+    # Modelar con ARIMA
+    modelo = ARIMA(series_temporal['cant_articulo'], order=(5, 1, 0))
+    modelo_fit = modelo.fit()
+
+    # Predecir los próximos 12 meses
+    predicciones = modelo_fit.forecast(steps=12)
+    fechas_futuras = pd.date_range(start=series_temporal.index[-1] + pd.DateOffset(months=1), periods=12, freq='M')
+    predicciones_df = pd.DataFrame({'fecha': fechas_futuras, 'cant_articulo': predicciones})
+
+    # Convertir a JSON
+    predicciones_json = predicciones_df.to_dict(orient='records')
+    response = make_response(jsonify(predicciones_json))
+    response.headers['Content-Type'] = 'application/json'
+
+    return response, 200, {'Access-Control-Allow-Origin': '*'}
 
 if __name__ == '__main__':
     app.run(debug=True)
